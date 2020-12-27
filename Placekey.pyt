@@ -98,7 +98,7 @@ class AddPlacekeys(object):
     def getParameterInfo(self):
         """Define parameter definitions"""
         in_fc = arcpy.Parameter(
-            name='in_features2',
+            name='in_features',
             displayName='Input Features',
             datatype='GPFeatureLayer',
             direction='Input',
