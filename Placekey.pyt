@@ -26,12 +26,22 @@ class ManageKey(object):
         logfile = join(dirname(abspath(__file__)), 'log.log')
         if loglevel == 1:
             log = open(logfile, 'a')
-            log.write('\n---------')
+            log.write('\nINFO\t')
             log.write(msg)
             log.close()
             arcpy.AddMessage(msg)
-        else:
-            arcpy.AddMessage(msg)
+        if loglevel == 2:
+            log = open(logfile, 'a')
+            log.write('\nWARN\t')
+            log.write(msg)
+            log.close()
+            arcpy.AddWarning(msg)
+        if loglevel == 3:
+            log = open(logfile, 'a')
+            log.write('\nERRR\t')
+            log.write(msg)
+            log.close()
+            arcpy.AddError(msg)
         return
 
     def getParameterInfo(self):
@@ -44,7 +54,7 @@ class ManageKey(object):
                 parameterType='Required')
         with open(join(dirname(abspath(__file__)), 'params.yaml'), 'r') as f:
             try:
-                config = yaml.load(f)
+                config = yaml.load(f, Loader=yaml.FullLoader)
                 key = config["apiKey"]
                 in_key.value = key
             except yaml.YAMLError as exc:
@@ -88,11 +98,19 @@ class AddPlacekeys(object):
     def getParameterInfo(self):
         """Define parameter definitions"""
         in_fc = arcpy.Parameter(
-                name='in_features',
-                displayName='Input Features',
-                datatype='GPFeatureLayer',
-                direction='Input',
-                parameterType='Required')
+            name='in_features',
+            displayName='Input Features',
+            datatype='GPFeatureLayer',
+            direction='Input',
+            parameterType='Required')
+        paramxy = arcpy.Parameter(
+                displayName="Geometry information",
+                name="geometryInfo",
+                datatype="GPString",
+                parameterType="Required",
+                direction="Input")
+        paramxy.filter.list = ["Use Geometry for WHERE-part", "Use Attributes for WHERE-part"]
+        paramxy.value = "Use Geometry for WHERE-part"
         param1 = arcpy.Parameter(
             displayName='Location Name Field',
             name='location',
@@ -132,7 +150,7 @@ class AddPlacekeys(object):
             displayName='ISO Country Field',
             name='country',
             datatype='Field',
-            parameterType='Required',
+            parameterType='Optional',
             direction='Input')
         param6.parameterDependencies = [in_fc.name]
         param7 = arcpy.Parameter(
@@ -141,7 +159,7 @@ class AddPlacekeys(object):
             datatype="GPFeatureLayer",
             direction="Output")
 
-        return [in_fc, param2, param1, param3, param4, param5, param6, param7]
+        return [in_fc, param1, paramxy, param2, param3, param4, param5, param6, param7, ]
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
@@ -151,6 +169,13 @@ class AddPlacekeys(object):
         """Modify the values and properties of parameters before internal
         validation is performed.  This method is called whenever a parameter
         has been changed."""
+        if parameters[2].value == "Use Geometry for WHERE-part":
+            for item in range(3, len(parameters)-1):
+                parameters[item].enabled = False
+        else:
+            for item in range(3, len(parameters)-1):
+                parameters[item].enabled = True
+
         return
 
     def updateMessages(self, parameters):
@@ -158,30 +183,38 @@ class AddPlacekeys(object):
         parameter.  This method is called after internal validation."""
         return
 
-    def create_result_fc():
-        return
 
-    def get_config(self, config_item):
+    def get_config(self):
         """Load the configuration file and find either major OSM tag keys or
         suitable OSM tag values for a given key"""
-        # Load JSON file with configuration info
-        json_file = join(dirname(abspath(__file__)), 'config/api.json')
-        try:
-            with open(json_file ) as f:
-                config_json = json.load(f)
-        except IOError:
-            arcpy.AddError('Configuration file %s not found.' % json_file)
-        except ValueError:
-            arcpy.AddError('Configuration file %s is not valid JSON.' %
-                           json_file)
-        # Compile a list of all major OSM tag keys
-        if config_item == "all":
-            return sorted([key for key in config_json])
-        # Compile a list of all major OSM tag values for the given OSM tag key
-        else:
-            return ""
+        # Load yaml file with configuration info
+        with open(join(dirname(abspath(__file__)), 'params.yaml'), 'r') as f:
+            try:
+                config = yaml.load(f, Loader=yaml.FullLoader)
+                key = config["apiKey"]
+            except yaml.YAMLError as exc:
+                ManageKey.logInfo(self, str(exc), 3)
+        return key
 
 
     def execute(self, parameters, messages):
         """The source code of the tool."""
+        key = self.get_config()
+        ManageKey.logInfo(self, "API Key used: " + key, 1)
+        # getting the input values:
+        in_fc = parameters[0].value
+        location = parameters[1].valueAsText
+        address = parameters[2].valueAsText
+        city = parameters[3].valueAsText
+        postal = parameters[4].valueAsText
+        region = parameters[5].valueAsText
+        country = parameters[6].valueAsText
+        ManageKey.logInfo(self, "Feature {}:".format(type(region)), 1)
+        if country is None:
+            # default to "US"
+            ManageKey.logInfo(self, "no country specified, using 'US' for all features", 2)
+        # reading the in_fc:
+        for row in arcpy.da.SearchCursor(in_fc):
+            # Print the current multipoint's ID
+            ManageKey.logInfo(self, "Feature {}:".format(row), 1)
         return
