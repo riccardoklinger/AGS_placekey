@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import arcpy
-import yaml
+#import yaml
 from os.path import join, dirname, abspath
 
 class Toolbox(object):
@@ -98,45 +98,45 @@ class AddPlacekeys(object):
     def getParameterInfo(self):
         """Define parameter definitions"""
         in_fc = arcpy.Parameter(
-            name='in_features',
+            name='in_features2',
             displayName='Input Features',
             datatype='GPFeatureLayer',
             direction='Input',
             parameterType='Required')
         paramxy = arcpy.Parameter(
-                displayName="Geometry information",
-                name="geometryInfo",
-                datatype="GPString",
-                parameterType="Required",
-                direction="Input")
+            displayName="Geometry information",
+            name="geometryInfo",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
         paramxy.filter.list = ["Use Geometry for WHERE-part", "Use Attributes for WHERE-part"]
         paramxy.value = "Use Geometry for WHERE-part"
         param1 = arcpy.Parameter(
             displayName='Location Name Field',
             name='location',
             datatype='Field',
-            parameterType='Required',
+            parameterType='Optional',
             direction='Input')
         param1.parameterDependencies = [in_fc.name]
         param2 = arcpy.Parameter(
             displayName='Address Field',
             name='address',
             datatype='Field',
-            parameterType='Required',
+            parameterType='Optional',
             direction='Input')
         param2.parameterDependencies = [in_fc.name]
         param3 = arcpy.Parameter(
             displayName='City Name Field',
             name='city',
             datatype='Field',
-            parameterType='Required',
+            parameterType='Optional',
             direction='Input')
         param3.parameterDependencies = [in_fc.name]
         param4 = arcpy.Parameter(
             displayName='Postal Code Field',
             name='postal',
             datatype='Field',
-            parameterType='Required',
+            parameterType='Optional',
             direction='Input')
         param4.parameterDependencies = [in_fc.name]
         param5 = arcpy.Parameter(
@@ -199,7 +199,7 @@ class AddPlacekeys(object):
 
     def execute(self, parameters, messages):
         """The source code of the tool."""
-        key = self.get_config()
+        #key = self.get_config()
         ManageKey.logInfo(self, "API Key used: " + key, 1)
         # getting the input values:
         in_fc = parameters[0].value
