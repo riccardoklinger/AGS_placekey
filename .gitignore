@@ -6,8 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
-# fgdbs from ArcGIS
-placekey.gdb/
+
+#idea files
+.idea
+*.lock
 
 # Distribution / packaging
 .Python
