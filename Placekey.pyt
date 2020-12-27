@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import arcpy
-
+import yaml
+from os.path import join, dirname, abspath
 
 class Toolbox(object):
     def __init__(self):
@@ -11,7 +12,70 @@ class Toolbox(object):
         self.alias = "PlacekeyToolbox"
 
         # List of tool classes associated with this toolbox
-        self.tools = [AddPlacekeys]
+        self.tools = [ManageKey, AddPlacekeys]
+
+
+class ManageKey(object):
+    def __init__(self):
+        """Define the tool (tool name is the name of the class)."""
+        self.label = "Add/Change API Key"
+        self.description = "Add or change the API Key in a local parameter file for use with the API"
+        self.canRunInBackground = False
+
+    def logInfo(self, msg, loglevel):
+        logfile = join(dirname(abspath(__file__)), 'log.log')
+        if loglevel == 1:
+            log = open(logfile, 'a')
+            log.write('\n---------')
+            log.write(msg)
+            log.close()
+            arcpy.AddMessage(msg)
+        else:
+            arcpy.AddMessage(msg)
+        return
+
+    def getParameterInfo(self):
+        """Define parameter definitions"""
+        in_key = arcpy.Parameter(
+                name='API_key',
+                displayName='API Key',
+                datatype='GPString',
+                direction='Input',
+                parameterType='Required')
+        with open(join(dirname(abspath(__file__)), 'params.yaml'), 'r') as f:
+            try:
+                config = yaml.load(f)
+                key = config["apiKey"]
+                in_key.value = key
+            except yaml.YAMLError as exc:
+                self.logInfo(str(exc), 1)
+        return [in_key]
+
+    def isLicensed(self):
+        """Set whether tool is licensed to execute."""
+        return True
+
+    def updateParameters(self, parameters):
+        """Modify the values and properties of parameters before internal
+        validation is performed.  This method is called whenever a parameter
+        has been changed."""
+        return
+
+
+    def updateMessages(self, parameters):
+        """Modify the messages created by internal validation for each tool
+        parameter.  This method is called after internal validation."""
+        self.logInfo("old Api Key was " + parameters[0].value, 1)
+        return
+
+    def execute(self, parameters, messages):
+        """The source code of the tool."""
+        dict_file = {'apiKey': parameters[0].value}
+
+        with open(join(dirname(abspath(__file__)), 'params.yaml'), 'w') as file:
+            documents = yaml.dump(dict_file, file)
+        self.logInfo("new Api Key is " + parameters[0].value, 1)
+        return
 
 
 class AddPlacekeys(object):
