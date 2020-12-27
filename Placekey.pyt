@@ -2,7 +2,12 @@
 
 import arcpy
 import yaml
+import math
+import json
+import requests
+import time
 from os.path import join, dirname, abspath
+import numpy as np
 
 class Toolbox(object):
     def __init__(self):
@@ -115,7 +120,7 @@ class AddPlacekeys(object):
             displayName='Location Name Field',
             name='location',
             datatype='Field',
-            parameterType='Optional',
+            parameterType='Required',
             direction='Input')
         param2.parameterDependencies = [param0.name]
         param3 = arcpy.Parameter(
@@ -143,7 +148,7 @@ class AddPlacekeys(object):
             displayName='Region Name Field',
             name='region',
             datatype='Field',
-            parameterType='Required',
+            parameterType='Optional',
             direction='Input')
         param6.parameterDependencies = [param0.name]
         param7 = arcpy.Parameter(
@@ -170,10 +175,10 @@ class AddPlacekeys(object):
         validation is performed.  This method is called whenever a parameter
         has been changed."""
         if parameters[1].value == "Use Geometry for WHERE-part":
-            for item in range(2, len(parameters)-1):
+            for item in range(3, len(parameters)-1):
                 parameters[item].enabled = False
         else:
-            for item in range(2, len(parameters)-1):
+            for item in range(3, len(parameters)-1):
                 parameters[item].enabled = True
 
         return
@@ -202,7 +207,7 @@ class AddPlacekeys(object):
         else:
             return string
 
-    def addPayloadItem(self, parameters, feature):
+    def addPayloadItem(self, parameters, feature, fields):
         """getting field names"""
         location_name = parameters[2].valueAsText
         address_name = parameters[3].valueAsText
@@ -212,37 +217,113 @@ class AddPlacekeys(object):
         country = parameters[7].valueAsText
         geometry = parameters[1].valueAsText
         item = {
-            "query_id": 1,
+            "query_id": str(feature[-1])
         }
-        if location_name != "":
+        if location_name != "" and location_name is not None:
             item["location_name"] = self.valueCheck(
-                str(feature.getValue(location_name)))
-        if address_name != "":
-            item["street_address"] = self.valueCheck(str(feature.getValue(address_name)))
-        if city_name != "":
-            item["city"] = self.valueCheck(str(feature.getValue(city_name)))
-        if zip_code != "":
-            item["postal_code"] = self.valueCheck(str(feature.getValue(zip_code)))
-        if region_name != "":
-            item["region"] = self.valueCheck(str(feature.getValue(region_name)))
-        if country != "":
-            item["iso_country_code"] = self.valueCheck(str(feature.getValue(country)))
-        if country == "":
+                str(feature[fields.index(location_name)]))
+        if address_name != "" and address_name is not None:
+            item["street_address"] = self.valueCheck(str(feature[fields.index(address_name)]))
+        if city_name != "" and city_name is not None:
+            item["city"] = self.valueCheck(str(feature[fields.index(city_name)]))
+        if zip_code != "" and zip_code is not None:
+            #ManageKey.logInfo(self, "{}".format(type(zip_code), 3)
+            item["postal_code"] = self.valueCheck(str(feature[fields.index(zip_code)]))
+        if region_name != "" and region_name is not None:
+            item["region"] = self.valueCheck(str(feature[fields.index(region_name)]))
+        if country != "" and country is not None:
+            item["iso_country_code"] = self.valueCheck(str(feature[fields.index(country)]))
+        if country == "" or country is None:
             item["iso_country_code"] = "US"
+        if geometry == "Use Geometry for WHERE-part":
+            try:
+                geom = feature[fields.index("SHAPE@")]
+                ManageKey.logInfo(self, "{}".format(type(geom)), 1)
+                spatial_ref = arcpy.Describe(parameters[0].value).spatialReference
+                if spatial_ref.factoryCode != "4326":
+                    #X, Y = geom.centroid.X, geom.centroid.Y
+                    srOUT = arcpy.SpatialReference(4326)  # GCS_WGS84
+                    geom2 = geom.projectAs(srOUT)
+                    X, Y = geom2.centroid.X, geom2.centroid.Y
+                else:
+                    X, Y = geom.centroid.X, geom.centroid.Y
+                if math.isnan(X) is False:
+                    item["latitude"] = Y
+                    item["longitude"] = X
+                else:
+                    ManageKey.logInfo(self, "Strange geometry found at feature with id " + str(feature[7]),2)
+            except:
+                ManageKey.logInfo(self, "Strange geometry found at feature with id " + str(feature[7]), 2)
 
         ManageKey.logInfo(self, "{}".format(item), 1)
-            #featGeometry = feature.geometry().centroid()
-            #sourceCrs = source.sourceCrs()
-            #if source.sourceCrs != QgsCoordinateReferenceSystem(4326):
-            #    destCrs = QgsCoordinateReferenceSystem(4326)
-            #    tr = QgsCoordinateTransform(sourceCrs, destCrs, QgsProject.instance())
-            #    featGeometry.transform(tr)
-            #if math.isnan(featGeometry.asPoint().y()) is False:
-            #    item["latitude"] = featGeometry.asPoint().y()
-            #    item["longitude"] = featGeometry.asPoint().x()
-            #else:
-             #   print("strange geometry found at feature with id " + str(feature.id()))
         return item
+
+    def getKeys(self, payload, result, key):
+        url = "https://api.placekey.io/v1/placekeys"
+        headers = {
+            'apikey': key,
+            'Content-Type': 'application/json',
+            'user-agent': 'placekey-arcGIS/0.8 batchMode'
+        }
+        response = requests.request(
+            "POST",
+            url,
+            headers=headers,
+            data=json.dumps(payload)
+        )
+        if response.status_code == 401:
+            ManageKey.logInfo(self, "check your API key. Seems like you're unauthorized!", 2)
+            ManageKey.logInfo(self, "invalid API key", 3)
+        if response.status_code == 429:
+            for retry in range(1, 11):
+                ManageKey.logInfo(self, 'waiting 10s, rate limit exceeded', 2)
+                ManageKey.logInfo(self, "trying again" + str(retry) + "/10 ", 2)
+                time.sleep(10)
+                response = requests.request(
+                    "POST",
+                    url,
+                    headers=headers,
+                    data=json.dumps(payload)
+                )
+                if response.status_code == 200:
+                    break
+                if retry == 10:
+                    ManageKey.logInfo(self, "tried 10 times, cancelling processing", 3)
+        if response.status_code == 200:
+            if "error" in response.json():
+                for entry in payload["queries"]:
+                    result.append(json.loads(
+                        """{"query_id": """ +
+                        str(entry["query_id"]) +
+                        """, "placekey": "Invalid address"}"""))
+            else:
+                for item in response.json():
+                    if "placekey" in item:
+                        result.append(item)
+                    if "error" in item:
+                        result.append(json.loads(
+                            """{"query_id": """ +
+                            str(item["query_id"]) +
+                            """, "placekey": "Invalid address"}"""))
+        if response.status_code == 400:
+            try:
+                if response.json()["error"][0:2] == "All":
+                    for entry in payload["queries"]:
+                        result.append(json.loads(
+                            """{"query_id": """ +
+                            str(entry["query_id"]) +
+                            """, "placekey": "Invalid address"}"""))
+            except BaseException:
+                ManageKey.logInfo(self,
+                    """No proper request sent. Details in the python log,
+                    make sure to have a proper set off attributes.
+                    If you're using a point layer, make sure to have
+                    valid geometries for all features! Response was: """ +
+                    response.text,
+                    3
+                )
+
+        return result
 
     def execute(self, parameters, messages):
         """The source code of the tool."""
@@ -250,14 +331,18 @@ class AddPlacekeys(object):
         ManageKey.logInfo(self, "API Key used: " + key, 1)
         # getting the input values:
         in_fc = parameters[0].value
-        #location = parameters[1].valueAsText
-        #address = parameters[2].valueAsText
-        #city = parameters[3].valueAsText
-        #postal = parameters[4].valueAsText
-        #region = parameters[5].valueAsText
-        country = parameters[7].valueAsText
-        #ManageKey.logInfo(self, "Feature {}:".format(type(region)), 1)
+        # getting fields:
+        fields = []
 
+        for item in range(2,len(parameters)-1):
+            if parameters[item].valueAsText:
+                fields.append(parameters[item].valueAsText)
+        fields.append("SHAPE@")
+        #adding object ID
+        oidfield = arcpy.Describe(parameters[0].value).OIDFieldName
+        fields.append(oidfield)
+        ManageKey.logInfo(self, "items {}:".format(fields), 1)
+        country = parameters[7].valueAsText
         #holding the batch info:
         payload = {"queries": []}
         batches = []
@@ -271,26 +356,38 @@ class AddPlacekeys(object):
         # number of features:
         arcpy.MakeTableView_management(in_fc, "in_memory_view")
         count = int(arcpy.GetCount_management("in_memory_view").getOutput(0))
-
-        for row in arcpy.da.SearchCursor(in_fc, ['*']):
+        for row in arcpy.da.SearchCursor(in_fc, fields):
             # Print the current multipoint's ID
-            ManageKey.logInfo(self, "Feature {}:".format(row), 1)
+            ManageKey.logInfo(self, "Feature: {}".format(row), 1)
             index += 1
             if index % 100 != 0 and index != count:
                 payloadItem = self.addPayloadItem(parameters,
-                                                  row)
+                                                  row,
+                                                  fields)
                 payload["queries"].append(payloadItem)
             if index % 100 == 0:
                 payloadItem = self.addPayloadItem(parameters,
-                                                  row)
+                                                  row,
+                                                  fields)
                 payload["queries"].append(payloadItem)
                 batches.append(payload)
                 payload = {"queries": []}
             if index == count:
                 payloadItem = self.addPayloadItem(parameters,
-                                                  row)
+                                                  row,
+                                                  fields)
                 payload["queries"].append(payloadItem)
                 batches.append(payload)
                 payload = {"queries": []}
-
+        current_batch = 0
+        batch_count = len(batches)
+        arcpy.SetProgressor("step", "Copying shapefiles to geodatabase...",
+                            0, batch_count, 1)
+        for batch in batches:
+            current_batch += 1
+            result = self.getKeys(batch, result, key)
+            arcpy.SetProgressorLabel("working on batch {0} out of {1}".format(batch, batch_count))
+            arcpy.SetProgressorPosition()
+        arcpy.ResetProgressor()
+        arcpy.AddMessage("{}".format(result))
         return
