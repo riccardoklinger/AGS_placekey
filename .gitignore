@@ -10,7 +10,7 @@ __pycache__/
 #idea files
 .idea
 *.lock
-params.yml
+params.yaml
 
 # Distribution / packaging
 .Python
