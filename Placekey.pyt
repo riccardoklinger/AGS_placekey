@@ -105,7 +105,7 @@ class AddPlacekeys(object):
         param0 = arcpy.Parameter(
             name='in_features',
             displayName='Input Features',
-            datatype='GPFeatureLayer',
+            datatype=['GPFeatureLayer','DETable'],
             direction='Input',
             parameterType='Required')
         param1 = arcpy.Parameter(
@@ -163,6 +163,7 @@ class AddPlacekeys(object):
             name="out_features",
             datatype="GPFeatureLayer",
             direction="Output")
+        param8.value="Placekeys_" + str(int(time.time()))
 
         return [param0, param1, param2, param3, param4, param5, param6, param7, param8]
 
@@ -180,12 +181,17 @@ class AddPlacekeys(object):
         else:
             for item in range(3, len(parameters)-1):
                 parameters[item].enabled = True
-
         return
 
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
+        try:
+            in_crs = arcpy.Describe(parameters[0].value).spatialReference
+        except:
+            in_crs = None
+        if in_crs is None:
+            parameters[1].setWarningMessage("selected source has no spatial reference / geometry")
         return
 
 
@@ -207,7 +213,7 @@ class AddPlacekeys(object):
         else:
             return string
 
-    def addPayloadItem(self, parameters, feature, fields):
+    def addPayloadItem(self, parameters, feature, fields, sr):
         """getting field names"""
         location_name = parameters[2].valueAsText
         address_name = parameters[3].valueAsText
@@ -238,24 +244,28 @@ class AddPlacekeys(object):
         if geometry == "Use Geometry for WHERE-part":
             try:
                 geom = feature[fields.index("SHAPE@")]
-                ManageKey.logInfo(self, "{}".format(type(geom)), 1)
-                spatial_ref = arcpy.Describe(parameters[0].value).spatialReference
-                if spatial_ref.factoryCode != "4326":
-                    #X, Y = geom.centroid.X, geom.centroid.Y
-                    srOUT = arcpy.SpatialReference(4326)  # GCS_WGS84
-                    geom2 = geom.projectAs(srOUT)
-                    X, Y = geom2.centroid.X, geom2.centroid.Y
+                #ManageKey.logInfo(self, "{}".format(type(geom)), 1)
+                #spatial_ref = arcpy.Describe(parameters[0].value).spatialReference
+                if geom:
+                    if sr.factoryCode != "4326":
+                        #X, Y = geom.centroid.X, geom.centroid.Y
+                        srOUT = arcpy.SpatialReference(4326)  # GCS_WGS84
+                        geom2 = geom.projectAs(srOUT)
+                        X, Y = geom2.centroid.X, geom2.centroid.Y
+                    else:
+                        X, Y = geom.centroid.X, geom.centroid.Y
+                    if math.isnan(X) is False:
+                        item["latitude"] = Y
+                        item["longitude"] = X
+                    else:
+                        arcpy.AddMessage("Strange geometry found at feature with id " + str(feature[-1]))
                 else:
-                    X, Y = geom.centroid.X, geom.centroid.Y
-                if math.isnan(X) is False:
-                    item["latitude"] = Y
-                    item["longitude"] = X
-                else:
-                    ManageKey.logInfo(self, "Strange geometry found at feature with id " + str(feature[7]),2)
+                    arcpy.AddMessage("Skipping Feature! No geometry found at feature with id " + str(feature[-1]))
+                    return
             except:
-                ManageKey.logInfo(self, "Strange geometry found at feature with id " + str(feature[7]), 2)
+                arcpy.AddMessage("Strange geometry found at feature with id " + str(feature[-1]))
 
-        ManageKey.logInfo(self, "{}".format(item), 1)
+        #ManageKey.logInfo(self, "{}".format(item), 1)
         return item
 
     def getKeys(self, payload, result, key):
@@ -271,6 +281,7 @@ class AddPlacekeys(object):
             headers=headers,
             data=json.dumps(payload)
         )
+        #ManageKey.logInfo(self, str(payload), 1)
         if response.status_code == 401:
             ManageKey.logInfo(self, "check your API key. Seems like you're unauthorized!", 2)
             ManageKey.logInfo(self, "invalid API key", 3)
@@ -325,23 +336,81 @@ class AddPlacekeys(object):
 
         return result
 
+    def sanitize_field_name(self, field_name):
+        old_field_name = field_name
+        field_name = field_name.replace(":", "_").replace(".", "_").replace('"', '_')
+        if field_name[0].isdigit():
+            field_name = "s_" + field_name
+        if field_name[-1] == "_":
+            field_name = field_name[:-1]
+        if field_name[0] == "_":
+            field_name = field_name[1:]
+        #arcpy.AddMessage(old_field_name + " changed to " + field_name)
+        while len(field_name) < 4:
+            field_name += "_"
+        return field_name
+
+    def create_result_fc(self, geometry, fields, name):
+        timestamp = int(time.time())
+        fc = join(arcpy.env.scratchWorkspace, name)
+
+        arcpy.AddMessage("\nCreating feature layer %s..." %
+                         (name))
+        if geometry:
+            geometry = 'Point'
+            arcpy.management.CreateFeatureclass(arcpy.env.scratchWorkspace,
+                                            name, geometry.upper(),
+                                            "", "DISABLED", "DISABLED",
+                                            arcpy.SpatialReference(4326), "")
+        else:
+            arcpy.management.CreateTable(arcpy.env.scratchWorkspace, name, "", "", "")
+        arcpy.AddMessage("\tAdding attribute Placekey...")
+        arcpy.AddField_management(fc, "PLACEKEY", "STRING", 20, 0, "", "Placekey")
+        for field in fields[:-1]:
+            if field != "SHAPE@":
+                field = self.sanitize_field_name(field)
+                arcpy.AddMessage("\tAdding attribute %s..." % field)
+                try:
+                    arcpy.AddField_management(fc, field, "STRING", 255, "", "",
+                                              field, "NULLABLE")
+                except arcpy.ExecuteError as error:
+                    arcpy.AddError(error)
+                    arcpy.AddError("\t\tAdding attribute %s failed.")
+        arcpy.AddMessage("\tAdding attribute %s..." % field)
+        try:
+            arcpy.AddField_management(fc, "OLD_ID", "STRING", 255, "", "", "OLD_ID")
+        except arcpy.ExecuteError as error:
+            arcpy.AddError(error)
+            arcpy.AddError("\t\tAdding attribute %s failed.")
+        return fc
+
     def execute(self, parameters, messages):
         """The source code of the tool."""
         key = self.get_config()
         ManageKey.logInfo(self, "API Key used: " + key, 1)
         # getting the input values:
         in_fc = parameters[0].value
+        out_fc_name = parameters[8].valueAsText
         # getting fields:
         fields = []
-
+        arcpy.MakeTableView_management(in_fc, "in_memory_view")
+        count = int(arcpy.GetCount_management("in_memory_view").getOutput(0))
+        if count < 1:
+            arcpy.AddWarning("no features found, check source")
+            return None
         for item in range(2,len(parameters)-1):
             if parameters[item].valueAsText:
                 fields.append(parameters[item].valueAsText)
-        fields.append("SHAPE@")
+        geometry = parameters[1].valueAsText
+        spatial_ref = None
+        if geometry == "Use Geometry for WHERE-part":
+            fields.append("SHAPE@")
+            spatial_ref = arcpy.Describe(parameters[0].value).spatialReference
+            srOUT = arcpy.SpatialReference(4326)  # GCS_WGS84
         #adding object ID
         oidfield = arcpy.Describe(parameters[0].value).OIDFieldName
         fields.append(oidfield)
-        ManageKey.logInfo(self, "items {}:".format(fields), 1)
+        #ManageKey.logInfo(self, "items {}:".format(fields), 1)
         country = parameters[7].valueAsText
         #holding the batch info:
         payload = {"queries": []}
@@ -354,40 +423,102 @@ class AddPlacekeys(object):
         # reading the in_fc:
         index = 0
         # number of features:
-        arcpy.MakeTableView_management(in_fc, "in_memory_view")
-        count = int(arcpy.GetCount_management("in_memory_view").getOutput(0))
         for row in arcpy.da.SearchCursor(in_fc, fields):
             # Print the current multipoint's ID
-            ManageKey.logInfo(self, "Feature: {}".format(row), 1)
+            #ManageKey.logInfo(self, "Feature: {}".format(row), 1)
             index += 1
             if index % 100 != 0 and index != count:
                 payloadItem = self.addPayloadItem(parameters,
                                                   row,
-                                                  fields)
-                payload["queries"].append(payloadItem)
+                                                  fields, spatial_ref)
+                if payloadItem:
+                    payload["queries"].append(payloadItem)
             if index % 100 == 0:
                 payloadItem = self.addPayloadItem(parameters,
                                                   row,
-                                                  fields)
-                payload["queries"].append(payloadItem)
+                                                  fields, spatial_ref)
+                if payloadItem:
+                    payload["queries"].append(payloadItem)
                 batches.append(payload)
                 payload = {"queries": []}
             if index == count:
                 payloadItem = self.addPayloadItem(parameters,
                                                   row,
-                                                  fields)
-                payload["queries"].append(payloadItem)
+                                                  fields, spatial_ref)
+                if payloadItem:
+                    payload["queries"].append(payloadItem)
                 batches.append(payload)
                 payload = {"queries": []}
+        if count > 0:
+            del row
         current_batch = 0
         batch_count = len(batches)
-        arcpy.SetProgressor("step", "Copying shapefiles to geodatabase...",
+        arcpy.SetProgressor("step", "calling API for batches...",
                             0, batch_count, 1)
         for batch in batches:
             current_batch += 1
             result = self.getKeys(batch, result, key)
-            arcpy.SetProgressorLabel("working on batch {0} out of {1}".format(batch, batch_count))
+            arcpy.SetProgressorLabel("working on batch {0} out of {1}".format(current_batch, batch_count))
             arcpy.SetProgressorPosition()
         arcpy.ResetProgressor()
-        arcpy.AddMessage("{}".format(result))
+        arcpy.AddMessage("merging source with placekeys...")
+        if geometry == "Use Geometry for WHERE-part":
+            arcpy.AddMessage('centroids of geometries used for inputs and resulting geometry of placekey layer!')
+            out_fc = self.create_result_fc(True, fields, out_fc_name)
+        else:
+            arcpy.AddMessage('attributes used for inputs, result will have no geometry!')
+            out_fc = self.create_result_fc(False, fields, out_fc_name)
+
+        new_cur = arcpy.InsertCursor(out_fc)
+        #
+        # ManageKey.logInfo(self, "{}".format(type(geom)), 1)
+        no_result = []
+        invalid_address = []
+        for row in arcpy.da.SearchCursor(in_fc, fields):
+            no_result.append(row[fields.index(oidfield)])
+            for index in range(0, len(result)):
+                #arcpy.AddMessage(str(result[index]["query_id"]))
+                if str(result[index]["query_id"]) == str(row[fields.index(oidfield)]):
+                    invalid_address.append(row[fields.index(oidfield)])
+                    no_result.pop(-1)
+                    placekey = result[index]["placekey"]
+                    if placekey != "Invalid address":
+                        invalid_address.pop(-1)
+                    #if copy == "true":
+                    new_row = new_cur.newRow()
+                    if geometry == "Use Geometry for WHERE-part":
+                        geom = row[fields.index("SHAPE@")]
+                        if spatial_ref.factoryCode != "4326":
+                            geom2 = geom.projectAs(srOUT)
+                            X, Y = geom2.centroid.X, geom2.centroid.Y
+                        else:
+                            X, Y = geom.centroid.X, geom.centroid.Y
+                        point = arcpy.Point(X,Y)
+
+                        new_row.setValue("SHAPE", point)
+                    new_row.setValue("PLACEKEY", result[index]["placekey"])
+                    new_row.setValue("OLD_ID", result[index]["query_id"])
+                    for field in fields:
+                        if field != "SHAPE@" and field != oidfield:
+                            #arcpy.AddMessage((field))
+                            #arcpy.AddMessage(str(row[fields.index(field)]))
+
+                            new_row.setValue(self.sanitize_field_name(field), str(row[fields.index(field)]))
+                    new_cur.insertRow(new_row)
+                    del new_row
+                    #attributes.append(placekey)
+                    #fet.setAttributes(attributes)
+                    #else:
+                    #    fet.setAttribute(0, feature.id())
+                    #    fet.setAttribute(1, placekey)
+                    result.pop(index)
+                    break
+        del new_cur
+        if len(no_result)>0:
+            arcpy.AddWarning("No response received for (SQL): ")
+            arcpy.AddWarning(oidfield + " in (" + ','.join(str(v) for v in no_result) + ")")
+        if len(invalid_address)>0:
+            arcpy.AddMessage("Invalid Address response received for (SQL): ")
+            arcpy.AddMessage(oidfield + " in (" + ','.join(str(v) for v in invalid_address) + ")")
+        parameters[8].value = out_fc
         return
