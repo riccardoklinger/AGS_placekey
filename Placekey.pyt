@@ -96,7 +96,7 @@ class ManageKey(object):
 class AddPlacekeys(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
-        self.label = "Add Placekeys to features"
+        self.label = "Get Placekeys for POIs"
         self.description = "Get Placekeys for POIs"
         self.canRunInBackground = True
 
