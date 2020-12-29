@@ -26,6 +26,12 @@ The Placekey API compares your address and POI data against multiple authoritati
 
 Please get yourself a Placekey API key at [placekey.io](https://placekey.io). Then use the processing step "Add/Change API key" to save your API key to a local file (params.yaml) for later usage.
 
+## Install
+
+Please download the toolbox and install it using the Catalog by adding a toolbox:
+
+![Adding a toolbox](https://i.imgur.com/cStktvz.gif)
+
 ## Usage
 
 Currently, vector layers and Geodatabase Tables are supported. If no latitude and longitude is available in your layer, make sure to fill the attributes:
