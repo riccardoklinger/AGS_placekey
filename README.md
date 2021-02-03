@@ -30,7 +30,7 @@ Please get yourself a Placekey API key at [placekey.io](https://placekey.io). Th
 
 Please download the toolbox and install it using the Catalog by adding a toolbox:
 
-![Adding a toolbox](https://i.imgur.com/Os56JFL.gif)
+![Adding a toolbox](https://i.imgur.com/1xHoCOE.gif)
 
 ## Usage
 
