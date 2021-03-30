@@ -105,22 +105,21 @@ class AddPlacekeys(object):
         param0 = arcpy.Parameter(
             name='in_features',
             displayName='Input Features',
-            datatype=['GPFeatureLayer','DETable'],
+            datatype=['GPFeatureLayer', 'DETable'],
             direction='Input',
             parameterType='Required')
         param1 = arcpy.Parameter(
-            displayName="Geometry information",
+            displayName="Use Geometry information",
             name="geometryInfo",
-            datatype="GPString",
+            datatype="GPBoolean",
             parameterType="Required",
             direction="Input")
-        param1.filter.list = ["Use Geometry for WHERE-part", "Use Attributes for WHERE-part"]
-        param1.value = "Use Geometry for WHERE-part"
+        param1.value = False
         param2 = arcpy.Parameter(
             displayName='Location Name Field',
             name='location',
             datatype='Field',
-            parameterType='Required',
+            parameterType='Optional',
             direction='Input')
         param2.parameterDependencies = [param0.name]
         param3 = arcpy.Parameter(
@@ -165,7 +164,7 @@ class AddPlacekeys(object):
             direction="Output")
         param8.value="Placekeys_" + str(int(time.time()))
 
-        return [param0, param1, param2, param3, param4, param5, param6, param7, param8]
+        return [param0, param1, param2, param3, param4, param6, param5, param7, param8]
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
@@ -175,23 +174,26 @@ class AddPlacekeys(object):
         """Modify the values and properties of parameters before internal
         validation is performed.  This method is called whenever a parameter
         has been changed."""
-        if parameters[1].value == "Use Geometry for WHERE-part":
-            for item in range(3, len(parameters)-1):
-                parameters[item].enabled = False
-        else:
-            for item in range(3, len(parameters)-1):
-                parameters[item].enabled = True
+        ManageKey.logInfo(self, str(parameters[1].value), 3)
+        #if parameters[1].value == "Use Geometry for WHERE-part":
+        #    for item in range(3, len(parameters)-1):
+        #        parameters[item].enabled = False
+        #else:
+        for item in range(3, len(parameters)-1):
+            parameters[item].enabled = True
         return
 
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
-        try:
-            in_crs = arcpy.Describe(parameters[0].value).spatialReference
-        except:
-            in_crs = None
-        if in_crs is None:
-            parameters[1].setWarningMessage("selected source has no spatial reference / geometry")
+        if parameters[1].value:
+            try:
+                in_crs = arcpy.Describe(parameters[0].value).spatialReference
+            except:
+                in_crs = None
+            if in_crs is None:
+                print("no crs")
+                parameters[1].setWarningMessage("selected source has no spatial reference / geometry")
         return
 
 
@@ -218,10 +220,10 @@ class AddPlacekeys(object):
         location_name = parameters[2].valueAsText
         address_name = parameters[3].valueAsText
         city_name = parameters[4].valueAsText
-        zip_code = parameters[5].valueAsText
-        region_name = parameters[6].valueAsText
+        zip_code = parameters[6].valueAsText
+        region_name = parameters[5].valueAsText
         country = parameters[7].valueAsText
-        geometry = parameters[1].valueAsText
+        geometry = parameters[1].value
         item = {
             "query_id": str(feature[-1])
         }
@@ -233,7 +235,6 @@ class AddPlacekeys(object):
         if city_name != "" and city_name is not None:
             item["city"] = self.valueCheck(str(feature[fields.index(city_name)]))
         if zip_code != "" and zip_code is not None:
-            #ManageKey.logInfo(self, "{}".format(type(zip_code), 3)
             item["postal_code"] = self.valueCheck(str(feature[fields.index(zip_code)]))
         if region_name != "" and region_name is not None:
             item["region"] = self.valueCheck(str(feature[fields.index(region_name)]))
@@ -241,7 +242,7 @@ class AddPlacekeys(object):
             item["iso_country_code"] = self.valueCheck(str(feature[fields.index(country)]))
         if country == "" or country is None:
             item["iso_country_code"] = "US"
-        if geometry == "Use Geometry for WHERE-part":
+        if geometry:
             try:
                 geom = feature[fields.index("SHAPE@")]
                 #ManageKey.logInfo(self, "{}".format(type(geom)), 1)
@@ -265,7 +266,7 @@ class AddPlacekeys(object):
             except:
                 arcpy.AddMessage("Strange geometry found at feature with id " + str(feature[-1]))
 
-        #ManageKey.logInfo(self, "{}".format(item), 1)
+        ManageKey.logInfo(self, "{}".format(item), 1)
         return item
 
     def getKeys(self, payload, result, key):
@@ -273,7 +274,7 @@ class AddPlacekeys(object):
         headers = {
             'apikey': key,
             'Content-Type': 'application/json',
-            'user-agent': 'placekey-arcGIS/0.8 batchMode'
+            'user-agent': 'placekey-arcGIS/0.9 batchMode'
         }
         response = requests.request(
             "POST",
@@ -376,7 +377,6 @@ class AddPlacekeys(object):
                 except arcpy.ExecuteError as error:
                     arcpy.AddError(error)
                     arcpy.AddError("\t\tAdding attribute %s failed.")
-        arcpy.AddMessage("\tAdding attribute %s..." % field)
         try:
             arcpy.AddField_management(fc, "OLD_ID", "STRING", 255, "", "", "OLD_ID")
         except arcpy.ExecuteError as error:
@@ -401,9 +401,9 @@ class AddPlacekeys(object):
         for item in range(2,len(parameters)-1):
             if parameters[item].valueAsText:
                 fields.append(parameters[item].valueAsText)
-        geometry = parameters[1].valueAsText
+        geometry = parameters[1].value
         spatial_ref = None
-        if geometry == "Use Geometry for WHERE-part":
+        if geometry:
             fields.append("SHAPE@")
             spatial_ref = arcpy.Describe(parameters[0].value).spatialReference
             srOUT = arcpy.SpatialReference(4326)  # GCS_WGS84
@@ -423,10 +423,15 @@ class AddPlacekeys(object):
         # reading the in_fc:
         index = 0
         # number of features:
+        arcpy.SetProgressor("step", "preparing features...",
+                            0, count, 1)
         for row in arcpy.da.SearchCursor(in_fc, fields):
+            index += 1
+            if index % 100 == 0:
+                arcpy.SetProgressorLabel("prepared {0} out of {1} features".format(index, count))
+            arcpy.SetProgressorPosition()
             # Print the current multipoint's ID
             #ManageKey.logInfo(self, "Feature: {}".format(row), 1)
-            index += 1
             if index % 100 != 0 and index != count:
                 payloadItem = self.addPayloadItem(parameters,
                                                   row,
@@ -451,6 +456,7 @@ class AddPlacekeys(object):
                 payload = {"queries": []}
         if count > 0:
             del row
+        arcpy.ResetProgressor()
         current_batch = 0
         batch_count = len(batches)
         arcpy.SetProgressor("step", "calling API for batches...",
@@ -462,9 +468,12 @@ class AddPlacekeys(object):
             arcpy.SetProgressorPosition()
         arcpy.ResetProgressor()
         arcpy.AddMessage("merging source with placekeys...")
-        if geometry == "Use Geometry for WHERE-part":
+        if geometry:
             arcpy.AddMessage('centroids of geometries used for inputs and resulting geometry of placekey layer!')
+            ManageKey.logInfo(self, "{}".format(type(fields)), 1)
+            ManageKey.logInfo(self, "{}".format(type(out_fc_name)), 1)
             out_fc = self.create_result_fc(True, fields, out_fc_name)
+
         else:
             arcpy.AddMessage('attributes used for inputs, result will have no geometry!')
             out_fc = self.create_result_fc(False, fields, out_fc_name)
@@ -485,8 +494,10 @@ class AddPlacekeys(object):
                     if placekey != "Invalid address":
                         invalid_address.pop(-1)
                     #if copy == "true":
+                    for field in row:
+                        arcpy.AddMessage(str(field))
                     new_row = new_cur.newRow()
-                    if geometry == "Use Geometry for WHERE-part":
+                    if geometry:
                         geom = row[fields.index("SHAPE@")]
                         if spatial_ref.factoryCode != "4326":
                             geom2 = geom.projectAs(srOUT)
