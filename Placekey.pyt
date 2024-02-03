@@ -174,13 +174,14 @@ class AddPlacekeys(object):
         """Modify the values and properties of parameters before internal
         validation is performed.  This method is called whenever a parameter
         has been changed."""
-        ManageKey.logInfo(self, str(parameters[1].value), 3)
-        #if parameters[1].value == "Use Geometry for WHERE-part":
+        #ManageKey.logInfo(self, "hey", 3)
+        ManageKey.logInfo(self, "use geometry: " + str(parameters[1].value), 1)
+        #if parameters[1].value:
         #    for item in range(3, len(parameters)-1):
         #        parameters[item].enabled = False
         #else:
-        for item in range(3, len(parameters)-1):
-            parameters[item].enabled = True
+        #    for item in range(3, len(parameters)-1):
+        #        parameters[item].enabled = True
         return
 
     def updateMessages(self, parameters):
@@ -266,7 +267,7 @@ class AddPlacekeys(object):
             except:
                 arcpy.AddMessage("Strange geometry found at feature with id " + str(feature[-1]))
 
-        ManageKey.logInfo(self, "{}".format(item), 1)
+        #ManageKey.logInfo(self, "{:c}".format(item), 1)
         return item
 
     def getKeys(self, payload, result, key):
@@ -470,8 +471,8 @@ class AddPlacekeys(object):
         arcpy.AddMessage("merging source with placekeys...")
         if geometry:
             arcpy.AddMessage('centroids of geometries used for inputs and resulting geometry of placekey layer!')
-            ManageKey.logInfo(self, "{}".format(type(fields)), 1)
-            ManageKey.logInfo(self, "{}".format(type(out_fc_name)), 1)
+            #ManageKey.logInfo(self, "{}".format(type(fields)), 1)
+            #ManageKey.logInfo(self, "{}".format(type(out_fc_name)), 1) 
             out_fc = self.create_result_fc(True, fields, out_fc_name)
 
         else:
